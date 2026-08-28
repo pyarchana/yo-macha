@@ -9,11 +9,22 @@ playlist name and every video name intact.
 pip install -r requirements.txt
 ```
 
-ffmpeg is already installed on this machine. If you ever move the project:
+You also need ffmpeg, which is what joins the video and audio streams:
 
 ```bash
 winget install Gyan.FFmpeg
 ```
+
+Optional but recommended, a JavaScript runtime. yt-dlp uses it to read YouTube's
+player, and without one it warns that some formats are hidden. In testing it was
+the difference between being offered a 1080p stream and a better one:
+
+```bash
+winget install DenoLand.Deno
+```
+
+winget installs deno without adding it to PATH, so the script looks inside the
+winget package folder as well. No PATH setup needed.
 
 ## Use
 
@@ -41,8 +52,13 @@ downloads/
     ├── 001 - Day 1： Setup & ＂Hello, World＂ [dQw4w9].mp4
     ├── 002 - Day 2, Variables ⧸ Types [xK9p2a].mp4
     ├── _index.md          readable list, original titles, clickable links
-    └── _playlist.json     same data for scripts
+    ├── _playlist.json     same data for scripts
+    └── _meta/             thumbnails and raw metadata, kept out of the way
 ```
+
+The playlist folder itself lists nothing but the videos and the two manifests.
+Thumbnails are already embedded in each mp4, so the loose copies and the
+per-video `.info.json` dumps live in `_meta/`.
 
 Names are protected at three levels, so nothing is lost.
 
