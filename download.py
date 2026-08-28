@@ -115,7 +115,8 @@ def build_opts(args, outdir: Path) -> dict:
             "pl_infojson": str(outdir / DIR_TMPL / META_DIR / PL_META_TMPL),
             "pl_thumbnail": str(outdir / DIR_TMPL / META_DIR / PL_META_TMPL),
         },
-        "paths": {"temp": str(outdir / ".tmp")},
+        # no "paths" here: yt-dlp ignores it when outtmpl is absolute, and
+        # setting both just prints a warning on every run
 
         # --- one file out, never a split pair ----------------------------
         "ffmpeg_location": find_ffmpeg(),
@@ -239,6 +240,28 @@ def write_manifest(info: dict, outdir: Path) -> Path | None:
     return folder
 
 
+def verify_playlist(info: dict, folder: Path) -> list[dict]:
+    """
+    yt-dlp swallows per-video errors when ignoreerrors is on, so a run where
+    half the playlist failed still exits 0. Cross-check the playlist against
+    what actually landed on disk and hand back whatever is missing.
+    """
+    entries = [e for e in (info.get("entries") or []) if e]
+    if not entries:
+        return []
+
+    media = {".mp4", ".mkv", ".webm", ".m4a", ".mp3", ".opus"}
+    on_disk = {f.name for f in folder.iterdir()
+               if f.is_file() and f.suffix.lower() in media}
+
+    missing = []
+    for i, e in enumerate(entries, 1):
+        idx = e.get("playlist_index") or i
+        if not any(n.startswith(f"{idx:03d} - ") for n in on_disk):
+            missing.append({"index": idx, "title": e.get("title"), "id": e.get("id")})
+    return missing
+
+
 def report_split_files(outdir: Path) -> None:
     """Leftover .fNNN files mean a merge failed - say so instead of hiding it."""
     strays = [p for p in outdir.rglob("*.f[0-9][0-9][0-9]*")
@@ -288,6 +311,7 @@ def main() -> int:
     opts = build_opts(args, outdir)
 
     failed = []
+    incomplete = []
     for url in urls:
         print(f"\n{'=' * 70}\n  {url}\n{'=' * 70}")
         try:
@@ -298,6 +322,17 @@ def main() -> int:
                 if folder:
                     print(f"\n  Saved to: {folder}")
                     print(f"  Manifest: {folder / '_playlist.json'}")
+                    gaps = verify_playlist(info, folder)
+                    if gaps:
+                        incomplete.append((url, gaps))
+                        total = len([e for e in info.get("entries") or [] if e])
+                        print(f"\n  INCOMPLETE: {total - len(gaps)} of {total} "
+                              f"videos downloaded, {len(gaps)} missing:",
+                              file=sys.stderr)
+                        for g in gaps[:15]:
+                            print(f"    {g['index']:03d}  {g['title']}", file=sys.stderr)
+                        if len(gaps) > 15:
+                            print(f"    ... and {len(gaps) - 15} more", file=sys.stderr)
         except DownloadError as e:
             print(f"  FAILED: {e}", file=sys.stderr)
             failed.append(url)
@@ -309,7 +344,17 @@ def main() -> int:
     print(f"\nDone. {len(urls) - len(failed)}/{len(urls)} url(s) succeeded.")
     for u in failed:
         print(f"  failed: {u}", file=sys.stderr)
-    return 1 if failed else 0
+
+    if incomplete:
+        total_missing = sum(len(g) for _, g in incomplete)
+        print(f"\n{total_missing} video(s) across {len(incomplete)} playlist(s) "
+              f"did not download.", file=sys.stderr)
+        print("Rerun the same command to retry only those. If the log said "
+              "'Sign in to confirm you are not a bot', YouTube is rate limiting "
+              "you, so wait a few hours, raise --sleep, or add "
+              "--cookies-from-browser chrome.", file=sys.stderr)
+
+    return 1 if failed or incomplete else 0
 
 
 if __name__ == "__main__":
