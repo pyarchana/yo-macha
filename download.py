@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from datetime import datetime
@@ -36,6 +37,10 @@ DIR_TMPL = ("%(playlist_title,playlist|Loose Videos)s"
 # video id makes the file traceable back to its source forever. The index and
 # its separator vanish entirely for a non-playlist video.
 FILE_TMPL = "%(playlist_index&{:03d} - |)s%(title)s [%(id)s].%(ext)s"
+# Sidecar files (thumbnails, metadata dumps) go in a _meta subfolder so the
+# playlist folder itself lists nothing but the videos.
+META_DIR = "_meta"
+PL_META_TMPL = "%(title)s [%(id)s].%(ext)s"
 
 
 def force_utf8_console() -> None:
@@ -45,6 +50,28 @@ def force_utf8_console() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+
+
+def find_js_runtime() -> str | None:
+    """
+    yt-dlp now needs a JavaScript runtime to read YouTube's player, and warns
+    that going without one is deprecated and may hide some formats. winget
+    installs deno without putting it on PATH, so look in its package folder too.
+    """
+    exe = shutil.which("deno")
+    if exe:
+        return exe
+
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    candidates = [
+        *(local / "Microsoft" / "WinGet" / "Packages").glob("DenoLand.Deno_*/deno.exe"),
+        Path.home() / ".deno" / "bin" / "deno.exe",
+        Path.home() / ".deno" / "bin" / "deno",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
 
 
 def find_ffmpeg() -> str:
@@ -79,7 +106,15 @@ def build_opts(args, outdir: Path) -> dict:
 
     opts = {
         "format": fmt,
-        "outtmpl": {"default": str(outdir / DIR_TMPL / FILE_TMPL)},
+        "outtmpl": {
+            "default": str(outdir / DIR_TMPL / FILE_TMPL),
+            # sidecars land beside the videos in _meta, not among them
+            "infojson": str(outdir / DIR_TMPL / META_DIR / FILE_TMPL),
+            "thumbnail": str(outdir / DIR_TMPL / META_DIR / FILE_TMPL),
+            "description": str(outdir / DIR_TMPL / META_DIR / FILE_TMPL),
+            "pl_infojson": str(outdir / DIR_TMPL / META_DIR / PL_META_TMPL),
+            "pl_thumbnail": str(outdir / DIR_TMPL / META_DIR / PL_META_TMPL),
+        },
         "paths": {"temp": str(outdir / ".tmp")},
 
         # --- one file out, never a split pair ----------------------------
@@ -109,6 +144,14 @@ def build_opts(args, outdir: Path) -> dict:
         "overwrites": False,
         "consoletitle": True,
     }
+
+    deno = find_js_runtime()
+    if deno:
+        opts["js_runtimes"] = {"deno": {"path": deno}}
+    else:
+        print("  note: no JavaScript runtime found, some formats may be missing.\n"
+              "        install one with:  winget install DenoLand.Deno",
+              file=sys.stderr)
 
     if args.playlist_items:
         opts["playlist_items"] = args.playlist_items
