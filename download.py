@@ -138,6 +138,14 @@ def build_opts(args, outdir: Path) -> dict:
         "ignoreerrors": "only_download",   # skip private/deleted, keep going
         "download_archive": str(outdir / "archive.txt") if args.archive else None,
         "concurrent_fragment_downloads": args.jobs,
+
+        # --- stay under YouTube's radar on big batches --------------------
+        # Hammering a few hundred videos back to back invites throttling and
+        # 429s. A short randomised pause between videos costs minutes and
+        # avoids losing a whole overnight run.
+        "sleep_interval": args.sleep,
+        "max_sleep_interval": args.sleep * 2 if args.sleep else 0,
+
         "retries": 10,
         "fragment_retries": 10,
         "continuedl": True,
@@ -257,6 +265,9 @@ def main() -> int:
     p.add_argument("--extras", action="store_true", help="also save description files")
     p.add_argument("--playlist-items", help="range to grab, e.g. 1-10 or 3,7,12-20")
     p.add_argument("-j", "--jobs", type=int, default=4, help="parallel fragment downloads (default: 4)")
+    p.add_argument("--sleep", type=float, default=3, metavar="SEC",
+                   help="pause between videos, randomised up to double, keeps big "
+                        "batches from getting rate limited (default: 3, use 0 to disable)")
     p.add_argument("--no-archive", dest="archive", action="store_false",
                    help="do not keep archive.txt (which lets you resume and skip duplicates)")
     p.add_argument("--cookies-from-browser", metavar="BROWSER",
