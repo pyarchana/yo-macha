@@ -1,0 +1,4 @@
+# One playlist URL per line. Lines starting with # are ignored.
+# Run with:  python download.py --from-file urls.txt
+
+# https://www.youtube.com/playlist?list=PLxxxxxxxxxxxxxxxx
