@@ -1,0 +1,6 @@
+downloads/
+*.part
+*.ytdl
+archive.txt
+__pycache__/
+.venv/
