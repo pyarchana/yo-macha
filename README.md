@@ -86,6 +86,35 @@ stray audio file. This project avoids that:
 
 Result: one `.mp4` per video, picture and sound together.
 
+## When YouTube rate limits you
+
+On a 29 video playlist this showed up after roughly 16 videos downloaded back
+to back:
+
+```
+ERROR: [youtube] Xm61kIAsH_M: Sign in to confirm you're not a bot.
+```
+
+Every remaining video then failed the same way. It is not a bug and not a dead
+video, it is YouTube throttling your IP address.
+
+What to do:
+
+1. **Stop and wait.** Retrying straight away tends to extend the block. A few
+   hours is usually enough, overnight is reliable.
+2. **Rerun the exact same command.** `archive.txt` records what already
+   finished, so only the missing videos are attempted. Nothing is downloaded twice.
+3. **Check the exit code.** The script counts what actually reached the disk and
+   exits non zero if anything is missing, listing each one by index and title.
+
+To avoid it in the first place, keep `--sleep` at 3 or higher, raise it to 5 or 8
+for very large playlists, and run one playlist per session rather than queueing
+five through `--from-file` in a single go.
+
+`--cookies-from-browser chrome` also defeats the check, but it authenticates the
+downloads against your Google account, which makes bulk activity attributable to
+you. Waiting is free, so prefer waiting.
+
 ## Notes
 
 - **Resume anytime.** Ctrl+C and rerun the same command. `archive.txt` records
