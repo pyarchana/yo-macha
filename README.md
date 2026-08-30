@@ -43,6 +43,7 @@ That is the whole thing. Common variations:
 | Only videos 1 to 10 | `python download.py <url> --playlist-items 1-10` |
 | Several playlists | `python download.py --from-file urls.txt` |
 | Your private playlist | `python download.py <url> --cookies-from-browser chrome` |
+| Somewhere roomier than C: | `python download.py <url> -o "D:\YouTube"` |
 
 ## What you get
 
@@ -53,6 +54,7 @@ downloads/
     ├── 002 - Day 2, Variables ⧸ Types [xK9p2a].mp4
     ├── _index.md          readable list, original titles, clickable links
     ├── _playlist.json     same data for scripts
+    ├── _missing.md        only if something failed, see below
     └── _meta/             thumbnails and raw metadata, kept out of the way
 ```
 
@@ -106,6 +108,10 @@ What to do:
    finished, so only the missing videos are attempted. Nothing is downloaded twice.
 3. **Check the exit code.** The script counts what actually reached the disk and
    exits non zero if anything is missing, listing each one by index and title.
+4. **Read `_missing.md`.** The same list is written into the playlist folder, so
+   it is still there days later once the terminal output has scrolled away. It
+   deletes itself as soon as a rerun fills the gaps, so if the file is present,
+   something is genuinely still missing.
 
 To avoid it in the first place, keep `--sleep` at 3 or higher, raise it to 5 or 8
 for very large playlists, and run one playlist per session rather than queueing
@@ -120,6 +126,10 @@ you. Waiting is free, so prefer waiting.
 - **Resume anytime.** Ctrl+C and rerun the same command. `archive.txt` records
   finished videos and they are skipped. Partial files continue where they left off.
 - **Private or deleted videos** in a playlist are skipped; the rest still download.
+- **The disk cannot fill up under you.** The script stops once free space drops
+  below 5 GB, adjustable with `--min-free`. A disk that runs out mid merge leaves
+  behind the separate video and audio files this project exists to prevent, so it
+  bails out while there is still room to finish cleanly. Rerunning resumes.
 - Long titles are trimmed to 180 characters to stay under the 260-character path
   limit on Windows. Keep the project path short for very long playlists.
 - Downloading is subject to YouTube's Terms of Service and to copyright in the
