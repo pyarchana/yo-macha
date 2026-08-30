@@ -23,7 +23,7 @@ from pathlib import Path
 
 try:
     from yt_dlp import YoutubeDL
-    from yt_dlp.utils import DownloadError
+    from yt_dlp.utils import DownloadCancelled, DownloadError
 except ImportError:
     sys.exit("yt-dlp is not installed. Run:  pip install -r requirements.txt")
 
@@ -147,6 +147,7 @@ def build_opts(args, outdir: Path) -> dict:
         "sleep_interval": args.sleep,
         "max_sleep_interval": args.sleep * 2 if args.sleep else 0,
 
+        "progress_hooks": [make_disk_guard(outdir, args.min_free)],
         "retries": 10,
         "fragment_retries": 10,
         "continuedl": True,
@@ -240,6 +241,29 @@ def write_manifest(info: dict, outdir: Path) -> Path | None:
     return folder
 
 
+def make_disk_guard(outdir: Path, min_free_gb: float):
+    """
+    Stop cleanly while there is still room to work. A disk that fills up during
+    a merge leaves exactly the half written, split video and audio files this
+    whole script exists to avoid, so bail out before that can happen.
+    """
+    floor = int(min_free_gb * 1024 ** 3)
+
+    def hook(d):
+        # only on completion, so this costs one stat call per file, not one
+        # per progress tick
+        if d.get("status") != "finished":
+            return
+        free = shutil.disk_usage(outdir).free
+        if free < floor:
+            raise DownloadCancelled(
+                f"only {free / 1024 ** 3:.1f} GB free, below the "
+                f"{min_free_gb} GB floor. Freeing space and rerunning the same "
+                f"command resumes where this stopped.")
+
+    return hook
+
+
 def verify_playlist(info: dict, folder: Path) -> list[dict]:
     """
     yt-dlp swallows per-video errors when ignoreerrors is on, so a run where
@@ -260,6 +284,36 @@ def verify_playlist(info: dict, folder: Path) -> list[dict]:
         if not any(n.startswith(f"{idx:03d} - ") for n in on_disk):
             missing.append({"index": idx, "title": e.get("title"), "id": e.get("id")})
     return missing
+
+
+def record_gaps(folder: Path, gaps: list[dict]) -> None:
+    """
+    Console output scrolls away, and the list of what failed is exactly what you
+    need days later when you come back to fill the holes. Keep it on disk next
+    to the videos, and clear it once a rerun has actually filled them.
+    """
+    missing_file = folder / "_missing.md"
+    pl_file = folder / "_playlist.json"
+
+    if not gaps:
+        missing_file.unlink(missing_ok=True)
+    else:
+        lines = ["# Missing videos", "",
+                 f"{len(gaps)} video(s) did not download. Rerun the same command "
+                 "to retry only these.", ""]
+        lines += [f"{g['index']:03d}. [{g['title']}]"
+                  f"(https://www.youtube.com/watch?v={g['id']})" for g in gaps]
+        missing_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    if pl_file.is_file():
+        try:
+            data = json.loads(pl_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        data["missing"] = gaps
+        data["complete"] = not gaps
+        pl_file.write_text(json.dumps(data, indent=2, ensure_ascii=False),
+                           encoding="utf-8")
 
 
 def report_split_files(outdir: Path) -> None:
@@ -288,6 +342,9 @@ def main() -> int:
     p.add_argument("--extras", action="store_true", help="also save description files")
     p.add_argument("--playlist-items", help="range to grab, e.g. 1-10 or 3,7,12-20")
     p.add_argument("-j", "--jobs", type=int, default=4, help="parallel fragment downloads (default: 4)")
+    p.add_argument("--min-free", type=float, default=5, metavar="GB",
+                   help="stop when free disk space drops below this, so a full "
+                        "disk cannot corrupt a merge (default: 5)")
     p.add_argument("--sleep", type=float, default=3, metavar="SEC",
                    help="pause between videos, randomised up to double, keeps big "
                         "batches from getting rate limited (default: 3, use 0 to disable)")
@@ -308,6 +365,16 @@ def main() -> int:
 
     outdir = Path(args.output).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+
+    free_gb = shutil.disk_usage(outdir).free / 1024 ** 3
+    if free_gb < args.min_free:
+        print(f"Only {free_gb:.1f} GB free on {outdir.drive or outdir}, which is "
+              f"under the {args.min_free} GB floor.\n"
+              f"Free some space, or point somewhere roomier with -o D:\\YouTube",
+              file=sys.stderr)
+        return 1
+    print(f"  {free_gb:.1f} GB free on {outdir.drive or outdir}")
+
     opts = build_opts(args, outdir)
 
     failed = []
@@ -323,6 +390,7 @@ def main() -> int:
                     print(f"\n  Saved to: {folder}")
                     print(f"  Manifest: {folder / '_playlist.json'}")
                     gaps = verify_playlist(info, folder)
+                    record_gaps(folder, gaps)
                     if gaps:
                         incomplete.append((url, gaps))
                         total = len([e for e in info.get("entries") or [] if e])
@@ -333,6 +401,12 @@ def main() -> int:
                             print(f"    {g['index']:03d}  {g['title']}", file=sys.stderr)
                         if len(gaps) > 15:
                             print(f"    ... and {len(gaps) - 15} more", file=sys.stderr)
+                        print(f"  recorded in {folder / '_missing.md'}",
+                              file=sys.stderr)
+        except DownloadCancelled as e:
+            print(f"\n  STOPPED: {e}", file=sys.stderr)
+            failed.append(url)
+            break
         except DownloadError as e:
             print(f"  FAILED: {e}", file=sys.stderr)
             failed.append(url)
