@@ -264,11 +264,32 @@ def make_disk_guard(outdir: Path, min_free_gb: float):
     return hook
 
 
+def fetch_expected(url: str, base_opts: dict) -> dict | None:
+    """
+    The download's own result cannot tell us what went wrong with it. When a
+    video fails, yt-dlp returns None in its place, so the failures are already
+    erased by the time the run finishes and the playlist looks complete.
+
+    Ask the playlist again in flat mode instead. That lists every entry with its
+    real index and title whether or not it downloaded, which is the only honest
+    baseline to compare the folder against.
+    """
+    opts = {k: base_opts[k] for k in ("js_runtimes", "cookiesfrombrowser")
+            if k in base_opts}
+    opts.update({"extract_flat": True, "quiet": True, "no_warnings": True,
+                 "skip_download": True})
+    try:
+        with YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
+    except Exception:
+        return None   # fall back to the download's own info rather than crash
+
+
 def verify_playlist(info: dict, folder: Path) -> list[dict]:
     """
-    yt-dlp swallows per-video errors when ignoreerrors is on, so a run where
-    half the playlist failed still exits 0. Cross-check the playlist against
-    what actually landed on disk and hand back whatever is missing.
+    Cross-check the playlist against what actually landed on disk and hand back
+    whatever is missing. Feed this the flat listing from fetch_expected, not the
+    result of the download, or failed videos will have already vanished from it.
     """
     entries = [e for e in (info.get("entries") or []) if e]
     if not entries:
@@ -389,11 +410,12 @@ def main() -> int:
                 if folder:
                     print(f"\n  Saved to: {folder}")
                     print(f"  Manifest: {folder / '_playlist.json'}")
-                    gaps = verify_playlist(info, folder)
+                    expected = fetch_expected(url, opts) or info
+                    gaps = verify_playlist(expected, folder)
                     record_gaps(folder, gaps)
                     if gaps:
                         incomplete.append((url, gaps))
-                        total = len([e for e in info.get("entries") or [] if e])
+                        total = len([e for e in expected.get("entries") or [] if e])
                         print(f"\n  INCOMPLETE: {total - len(gaps)} of {total} "
                               f"videos downloaded, {len(gaps)} missing:",
                               file=sys.stderr)
