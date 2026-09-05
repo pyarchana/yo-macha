@@ -113,6 +113,11 @@ What to do:
    deletes itself as soon as a rerun fills the gaps, so if the file is present,
    something is genuinely still missing.
 
+A video the uploader deleted or made private will keep appearing in `_missing.md`
+on every run, because it genuinely is missing and no amount of retrying will
+fetch it. Open its link to check: if YouTube says the video is unavailable, that
+entry is gone for good and the rest of the playlist is complete.
+
 To avoid it in the first place, keep `--sleep` at 3 or higher, raise it to 5 or 8
 for very large playlists, and run one playlist per session rather than queueing
 five through `--from-file` in a single go.
